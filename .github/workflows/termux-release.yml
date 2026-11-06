@@ -39,14 +39,15 @@ jobs:
             curl unzip zip wget file ninja-build qemu-user-static
 
       - name: Download Android NDK
+        timeout-minutes: 40
         run: |
           curl -L --retry 3 --retry-delay 10 \
             -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" \
             -H "Referer: https://developer.android.com/" \
             -o android-ndk.zip \
-            https://dl.google.com/android/repository/android-ndk-r26b-linux-x86_64.zip
+            https://dl.google.com/android/repository/android-ndk-r30-linux.zip
           unzip -q android-ndk.zip
-          echo "NDK_DIR=$PWD/android-ndk-r26b" >> "$GITHUB_ENV"
+          echo "NDK_DIR=$PWD/android-ndk-r30" >> "$GITHUB_ENV"
 
       - name: Configure CMake for Android arm64
         run: |
@@ -60,6 +61,7 @@ jobs:
             -DGOOSE_VERSION="${GITHUB_REF_NAME#v}"
 
       - name: Build Goose
+        timeout-minutes: 30
         run: cmake --build build-android --parallel "$(nproc)"
 
       - name: Verify binary is aarch64
