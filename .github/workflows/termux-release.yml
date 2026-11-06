@@ -1,0 +1,108 @@
+# Cross-compiles Goose for Android arm64 (Termux) on version tags and
+# publishes the archive as a GitHub release asset. GitHub Actions has no
+# native Termux runners, so this cross-compiles on Ubuntu with the Android
+# NDK; the resulting aarch64 Linux/Android binary runs on Termux.
+#
+# To use it on your phone:
+#   pkg install termux-elf-cleaner   # if the dynamic linker path needs fixing
+#   tar xzf goose-*.tar.gz
+#   cd goose-*
+#   export GOOSE_STDLIB=$PWD/stdlib
+#   ./bin/goose --version
+#   ./bin/goose run myprogram.goose
+#
+# The binary is linked against Android's bionic libc. On stock Termux the
+# dynamic linker path may point at /system/bin/linker64; if it does not run,
+# install termux-elf-cleaner and run it on bin/goose.
+
+name: Release for Termux (Android arm64)
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Cross-compile Goose for Android arm64
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+            curl unzip zip wget file ninja-build qemu-user-static
+
+      - name: Download Android NDK
+        run: |
+          wget -q https://dl.google.com/android/repository/android-ndk-r27b-linux-x86_64.zip
+          unzip -q android-ndk-r27b-linux-x86_64.zip
+          echo "NDK_DIR=$PWD/android-ndk-r27b" >> "$GITHUB_ENV"
+
+      - name: Configure CMake for Android arm64
+        run: |
+          cmake -S . -B build-android \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK_DIR/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-21 \
+            -DANDROID_STL=c++_shared \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DGOOSE_VERSION="${GITHUB_REF_NAME#v}"
+
+      - name: Build Goose
+        run: cmake --build build-android --parallel "$(nproc)"
+
+      - name: Verify binary is aarch64
+        run: |
+          file build-android/goose
+          readelf -h build-android/goose | grep -E 'Class|Machine|Type'
+
+      # Try to generate the man page with qemu-user; if the Android dynamic
+      # linker prevents that, the man page is simply omitted (goose help
+      # still works at runtime on the phone).
+      - name: Generate man page (best effort)
+        run: |
+          mkdir -p dist/goose-termux-arm64/man
+          if qemu-aarch64-static build-android/goose help --man > dist/goose-termux-arm64/man/goose.1 2>/dev/null; then
+            echo "man page generated"
+          else
+            echo "man page skipped (arm64 binary cannot run on x86_64 runner)"
+          fi
+
+      - name: Package release directory
+        run: |
+          mkdir -p dist/goose-termux-arm64/bin
+          cp build-android/goose dist/goose-termux-arm64/bin/goose
+          cp -r build-android/tcclib dist/goose-termux-arm64/tcclib
+          cp -r stdlib dist/goose-termux-arm64/stdlib
+          cp -r docs dist/goose-termux-arm64/docs
+          cp -r samples dist/goose-termux-arm64/samples
+          cp README.md LICENSE dist/goose-termux-arm64/
+          # Remove sample test harness, as in package_release.py
+          rm -rf dist/goose-termux-arm64/samples/run_samples.py dist/goose-termux-arm64/samples/expected
+
+      - name: Archive
+        working-directory: dist
+        run: tar -czf goose-termux-arm64.tar.gz goose-termux-arm64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: goose-termux-arm64
+          path: dist/goose-termux-arm64.tar.gz
+          retention-days: 7
+
+      - name: Publish release asset
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            "dist/goose-termux-arm64.tar.gz" \
+            --title "Goose ${GITHUB_REF_NAME} for Termux (Android arm64)" \
+            --notes "Cross-compiled for Android arm64 (aarch64) with the NDK. Unpack, add bin/ to PATH, set GOOSE_STDLIB to the stdlib/ directory, and run \`./bin/goose run myprogram.goose\`. If the dynamic linker path does not resolve on stock Termux, install \`termux-elf-cleaner\` and run it on \`bin/goose\`."
+        env:
+          GH_TOKEN: ${{ github.token }}
