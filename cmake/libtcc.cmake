@@ -107,16 +107,6 @@ if(NOT WIN32)
     target_link_libraries(libtcc PUBLIC ${CMAKE_DL_LIBS} m)
 endif()
 
-# When cross-compiling (e.g. x86_64 -> Android arm64), the just-built tcc is
-# a target binary that cannot run on the build host. Skip the tcc1 runtime
-# objects and provide stubs; libtcc itself is still linked, so `goose build`
-# works on the target. `goose run` (JIT mode) may need tcc1 for programs
-# using compiler support routines, but the compiler itself works fine.
-if(CMAKE_CROSSCOMPILING)
-    set(TCC1_SKIP 1)
-    message(STATUS "libtcc: cross-compiling, using stubs for tcc1 runtime")
-endif()
-
 # --- staged runtime directory ------------------------------------------------
 # What tcc_set_lib_path() is pointed at, laid out the way TinyCC's own install
 # is: its headers under include/, and the support archive where the target's
@@ -140,55 +130,64 @@ endif()
 # only a standalone executable or DLL needs (the C runtime startup code, bounds
 # checking, backtraces), none of which an in-memory run reaches.
 
-if(TCC1_SKIP)
-    # Cross-compiling: cannot run the target tcc on the build host. Provide
-    # empty stubs so dependent targets have files to depend on.
-    add_custom_command(OUTPUT "${tcc_libdir}/libtcc1.a"
-        COMMAND ${CMAKE_COMMAND} -E touch "${tcc_libdir}/libtcc1.a"
-        COMMENT "stub libtcc1.a (cross-compile)"
-        VERBATIM)
-    add_custom_command(OUTPUT "${tcc_libdir}/runmain.o"
-        COMMAND ${CMAKE_COMMAND} -E touch "${tcc_libdir}/runmain.o"
-        COMMENT "stub runmain.o (cross-compile)"
-        VERBATIM)
-else()
-    # -B is the staged directory the compiled program will also be built against;
-    # -I reaches config.h, which some of these sources include.
-    set(tcc1_flags -B${TCC_STAGE} -nostdinc -nostdlib -Wl,-nostdlib
-                   -I${TCC_STAGE}/include -I${TCC_BUILD} -I${TCC_SRC})
-    if(WIN32)
-        list(APPEND tcc1_flags -I${TCC_STAGE}/include/winapi)
+if(tcc_arch STREQUAL "arm64")
+    set(tcc1_srcs lib/lib-arm64.c)
+    if(NOT WIN32 AND NOT APPLE)
+        list(APPEND tcc1_srcs lib/armflush.c)
     endif()
-    set(tcc1_objs "")
-    file(MAKE_DIRECTORY "${TCC_BUILD}/obj")   # tcc writes objects, it does not create paths.
-    foreach(src IN LISTS tcc1_srcs)
-        get_filename_component(obj "${src}" NAME_WE)
-        set(obj "${TCC_BUILD}/obj/${obj}.o")
-        add_custom_command(OUTPUT "${obj}"
-            COMMAND "${TCC_BUILD}/tcc${CMAKE_EXECUTABLE_SUFFIX}" ${tcc1_flags}
-                    -c "${TCC_SRC}/${src}" -o "${obj}"
-            DEPENDS tcc_driver "${TCC_SRC}/${src}"
-            COMMENT "tcc ${src}"
-            VERBATIM)
-        list(APPEND tcc1_objs "${obj}")
-    endforeach()
-
-    add_custom_command(OUTPUT "${tcc_libdir}/libtcc1.a"
-        COMMAND "${TCC_BUILD}/tcc${CMAKE_EXECUTABLE_SUFFIX}" -ar rcs
-                "${tcc_libdir}/libtcc1.a" ${tcc1_objs}
-        DEPENDS ${tcc1_objs}
-        COMMENT "tcc -ar libtcc1.a"
-        VERBATIM)
-
-    # tcc_run() loads this one separately: it is what calls the program's main and
-    # runs its constructors, so it is deliberately not inside the archive.
-    add_custom_command(OUTPUT "${tcc_libdir}/runmain.o"
-        COMMAND "${TCC_BUILD}/tcc${CMAKE_EXECUTABLE_SUFFIX}" ${tcc1_flags}
-                -c "${TCC_SRC}/lib/runmain.c" -o "${tcc_libdir}/runmain.o"
-        DEPENDS tcc_driver "${TCC_SRC}/lib/runmain.c"
-        COMMENT "tcc lib/runmain.c"
-        VERBATIM)
+else()
+    set(tcc1_srcs lib/libtcc1.c)
+    if(NOT WIN32)
+        list(APPEND tcc1_srcs lib/va_list.c)
+    endif()
 endif()
+list(APPEND tcc1_srcs lib/stdatomic.c lib/atomic.S lib/builtin.c
+                      lib/alloca.S lib/alloca-bt.S)
+if(WIN32)
+    # crt1.c is where the Windows _runmain lives — the entry point tcc_run()
+    # calls, which the platform-independent lib/runmain.c defines only for the
+    # ELF and Mach-O targets.
+    list(APPEND tcc1_srcs win32/lib/chkstk.S win32/lib/winex.c win32/lib/crt1.c)
+elseif(NOT APPLE)
+    list(APPEND tcc1_srcs lib/dsohandle.c)
+endif()
+
+# -B is the staged directory the compiled program will also be built against;
+# -I reaches config.h, which some of these sources include.
+set(tcc1_flags -B${TCC_STAGE} -nostdinc -nostdlib -Wl,-nostdlib
+               -I${TCC_STAGE}/include -I${TCC_BUILD} -I${TCC_SRC})
+if(WIN32)
+    list(APPEND tcc1_flags -I${TCC_STAGE}/include/winapi)
+endif()
+set(tcc1_objs "")
+file(MAKE_DIRECTORY "${TCC_BUILD}/obj")   # tcc writes objects, it does not create paths.
+foreach(src IN LISTS tcc1_srcs)
+    get_filename_component(obj "${src}" NAME_WE)
+    set(obj "${TCC_BUILD}/obj/${obj}.o")
+    add_custom_command(OUTPUT "${obj}"
+        COMMAND "${TCC_BUILD}/tcc${CMAKE_EXECUTABLE_SUFFIX}" ${tcc1_flags}
+                -c "${TCC_SRC}/${src}" -o "${obj}"
+        DEPENDS tcc_driver "${TCC_SRC}/${src}"
+        COMMENT "tcc ${src}"
+        VERBATIM)
+    list(APPEND tcc1_objs "${obj}")
+endforeach()
+
+add_custom_command(OUTPUT "${tcc_libdir}/libtcc1.a"
+    COMMAND "${TCC_BUILD}/tcc${CMAKE_EXECUTABLE_SUFFIX}" -ar rcs
+            "${tcc_libdir}/libtcc1.a" ${tcc1_objs}
+    DEPENDS ${tcc1_objs}
+    COMMENT "tcc -ar libtcc1.a"
+    VERBATIM)
+
+# tcc_run() loads this one separately: it is what calls the program's main and
+# runs its constructors, so it is deliberately not inside the archive.
+add_custom_command(OUTPUT "${tcc_libdir}/runmain.o"
+    COMMAND "${TCC_BUILD}/tcc${CMAKE_EXECUTABLE_SUFFIX}" ${tcc1_flags}
+            -c "${TCC_SRC}/lib/runmain.c" -o "${tcc_libdir}/runmain.o"
+    DEPENDS tcc_driver "${TCC_SRC}/lib/runmain.c"
+    COMMENT "tcc lib/runmain.c"
+    VERBATIM)
 
 add_custom_target(tcc_runtime ALL
     DEPENDS "${tcc_libdir}/libtcc1.a" "${tcc_libdir}/runmain.o")

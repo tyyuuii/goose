@@ -1,3 +1,15 @@
+**Termux (Android aarch64) nightly build stopgap.** This fork auto-builds
+Goose for Termux on every push to `aardappel/goose` main, so you don't have to
+wait 10 minutes to compile it yourself. Install via apt:
+
+```bash
+echo "deb https://tyyuuii.github.io/goose/ stable main" >> $PREFIX/etc/apt/sources.list.d/goose.list
+pkg update
+pkg install goose-nightly
+```
+
+This is a backup until the main project ships aarch64/Termux binaries.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/logo/logo_white_fg_trans_bg_mini.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/logo/logo_black_fg_white_bg_mini.png">
