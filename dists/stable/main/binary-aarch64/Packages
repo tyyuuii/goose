@@ -1,0 +1,16 @@
+Package: goose
+Version: 1.0-1
+Section: devel
+Priority: optional
+Architecture: aarch64
+Maintainer: tyyuuii <tyyuuii@users.noreply.github.com>
+Description: Goose programming language compiler
+ A memory-safe systems language with no heap allocator, garbage collector,
+ or lifetime annotations. Every dynamic value lives inline on data stacks
+ managed by the compiler. Includes the goose compiler, standard library,
+ TinyCC runtime, docs, and samples.
+Homepage: https://github.com/tyyuuii/goose
+Filename: pool/main/g/goose/goose_1.0-1_aarch64.deb
+Size: 12910956
+MD5sum: 3f2adbeda527327f380ea2bd4bda7b0f
+SHA256: 3fc9adb5b4ac0449293fa6e185bdc8fbb280d41af2ee7013dbcd54d3c4856538
