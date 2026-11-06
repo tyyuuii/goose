@@ -5,11 +5,11 @@ Version: 1.0
 Codename: stable
 Architectures: aarch64
 Components: main
-Description: Goose programming language apt repository
-Date: Fri, 06 Nov 2026 14:29:43 UTC
+Description: Goose programming language apt repository (Termux nightly)
+Date: Fri, 06 Nov 2026 15:13:07 UTC
 MD5Sum:
- dc60ce661c6972c2c9591777f2bf81fb 672 main/binary-aarch64/Packages
- a13c3b50c0eeb35dc63fe91c51a4911a 473 main/binary-aarch64/Packages.gz
+ b7797a4e205ece909a64165d26f5b0a0 1297 main/binary-aarch64/Packages
+ b94c9eae92af22a27e94b6bc067a21b9 633 main/binary-aarch64/Packages.gz
 SHA256:
- a53f1bca12c8722cca7c9b853ace92108c9ef67feb9ef0716e9dc044824e7781 672 main/binary-aarch64/Packages
- 3c50369f24455444c5cd562d898690e9c299dbdc54155e989d1645c573a2d697 473 main/binary-aarch64/Packages.gz
+ cd037e1c0073326688d81f7af18919b50752336e1462ad940bbf1ae59519459f 1297 main/binary-aarch64/Packages
+ 13d81ed28c11fba20a51aee3df766a94dbceaebb4dea29b9fb205d15809ba688 633 main/binary-aarch64/Packages.gz
