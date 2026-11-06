@@ -38,16 +38,21 @@ jobs:
           sudo apt-get update && sudo apt-get install -y --no-install-recommends \
             curl unzip zip wget file ninja-build qemu-user-static
 
-      - name: Install Android NDK
-        uses: n_crc/android-ndk-github-action@v2
-        with:
-          version: r26b
+      - name: Download Android NDK
+        run: |
+          curl -L --retry 3 --retry-delay 10 \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" \
+            -H "Referer: https://developer.android.com/" \
+            -o android-ndk.zip \
+            https://dl.google.com/android/repository/android-ndk-r26b-linux-x86_64.zip
+          unzip -q android-ndk.zip
+          echo "NDK_DIR=$PWD/android-ndk-r26b" >> "$GITHUB_ENV"
 
       - name: Configure CMake for Android arm64
         run: |
           cmake -S . -B build-android \
             -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK_DIR/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-21 \
             -DANDROID_STL=c++_shared \
