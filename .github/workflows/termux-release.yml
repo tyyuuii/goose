@@ -1,3 +1,6 @@
+permissions:
+  contents: write
+
 # Cross-compiles Goose for Android arm64 (Termux) on version tags and
 # publishes the archive as a GitHub release asset. GitHub Actions has no
 # native Termux runners, so this cross-compiles on Ubuntu with the Android
