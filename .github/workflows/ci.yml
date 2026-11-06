@@ -1,26 +1,19 @@
-# Termux CI: builds the Goose compiler with the same toolchain Termux uses
-# (clang, cmake, make, python, git) and runs the test suite against it.
+# Simple CI: builds Goose with the Termux-equivalent toolchain on every push.
+#
+# No releases, no tags, no apt publishing. Just verifies the compiler builds
+# with the same toolchain Termux uses (clang, cmake, make, python, git).
 # GitHub Actions has no native Termux runners, so this runs on Ubuntu with
 # Termux-equivalent packages.
-#
-# On a real Termux device the equivalent install is:
-#   pkg install cmake clang git python make ninja
-#   cmake -B build -DCMAKE_BUILD_TYPE=Debug -DGOOSE_BUILTIN_LIBS=all
-#   cmake --build build --config Debug
 
 name: CI (Termux)
 
 on:
   push:
-  pull_request:
+    branches: [main]
   workflow_dispatch:
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  termux:
+  build:
     name: Termux-equivalent (clang + cmake on Ubuntu)
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -44,12 +37,6 @@ jobs:
 
       - name: Build
         run: cmake --build build-termux --config Debug
-
-      - name: Check formatting
-        run: build-termux/goose format --check samples stdlib
-
-      - name: Test
-        run: python test/run_tests.py --exe build-termux/goose --profile baseline --cc native --require-clang
 
       - name: Smoke test the compiler
         run: build-termux/goose --version

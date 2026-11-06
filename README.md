@@ -6,6 +6,19 @@
 
 # The Goose Programming Language
 
+**Termux (Android aarch64) nightly build stopgap.** This fork auto-builds
+Goose for Termux on every push to `aardappel/goose` main, so you don't have
+to wait 10 minutes to compile it yourself. Install via apt:
+
+```bash
+echo "deb https://tyyuuii.github.io/goose/ stable main" >> $PREFIX/etc/apt/sources.list.d/goose.list
+pkg update
+pkg install goose-nightly
+```
+
+This is a backup until the main project ships aarch64/Termux binaries.
+
+
 A memory-safe systems language with no heap allocator, garbage collector, or
 lifetime annotations. In this repository's benchmarks, Goose runs faster than
 C++ and Rust while using less memory.
