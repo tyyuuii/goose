@@ -110,34 +110,21 @@ jobs:
           git tag "$TAG"
           git push origin "$TAG"
 
+          # Write release notes to a file
+          printf 'Nightly build from commit %s on %s.\nCross-compiled for Android arm64 (aarch64) with the NDK.\n\nInstall:\n  tar xzf goose-termux-arm64.tar.gz\n  cd goose-termux-arm64\n  export GOOSE_STDLIB=$PWD/stdlib\n  export PATH=$PWD/bin:$PATH\n  ./bin/goose --version\n' \
+            "$GITHUB_SHA::8" "$(date -u)" > /tmp/nightly-notes.txt
+
           # Create or update the "nightly" release (always latest)
           if gh release view "nightly" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "nightly" "dist/goose-termux-arm64.tar.gz" --clobber --repo "$GITHUB_REPOSITORY"
             gh release edit "nightly" \
               --title "Goose Nightly (${DATE})" \
-              --notes "Nightly build from commit ${GITHUB_SHA::8} on $(date -u). Cross-compiled for Android arm64 (aarch64) with the NDK.
-
-Install:
-  pkg install wget
-  wget https://github.com/${GITHUB_REPOSITORY}/releases/download/nightly/goose-termux-arm64.tar.gz
-  tar xzf goose-termux-arm64.tar.gz
-  cd goose-termux-arm64
-  export GOOSE_STDLIB=\$PWD/stdlib
-  export PATH=\$PWD/bin:\$PATH
-  ./bin/goose --version" \
+              --notes-file /tmp/nightly-notes.txt \
               --repo "$GITHUB_REPOSITORY"
           else
             gh release create "nightly" \
               "dist/goose-termux-arm64.tar.gz" \
               --title "Goose Nightly (${DATE})" \
-              --notes "Nightly build from commit ${GITHUB_SHA::8} on $(date -u). Cross-compiled for Android arm64 (aarch64) with the NDK.
-
-Install:
-  pkg install wget
-  wget https://github.com/${GITHUB_REPOSITORY}/releases/download/nightly/goose-termux-arm64.tar.gz
-  tar xzf goose-termux-arm64.tar.gz
-  cd goose-termux-arm64
-  export GOOSE_STDLIB=\$PWD/stdlib
-  export PATH=\$PWD/bin:\$PATH
-  ./bin/goose --version" \
+              --notes-file /tmp/nightly-notes.txt \
               --repo "$GITHUB_REPOSITORY"
+          fi
