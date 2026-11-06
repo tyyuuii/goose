@@ -1,7 +1,7 @@
 # Automatically sync upstream aardappel/goose main into this fork's main.
 #
 # Runs every 6 hours and on manual dispatch. Every successful sync pushes to
-# main, which triggers the nightly build workflow (nightly.yml).
+# main, which then triggers the nightly build (nightly.yml).
 
 name: Sync upstream
 
@@ -38,17 +38,28 @@ jobs:
           git fetch upstream
 
       - name: Merge upstream/main into main
+        id: merge
         run: |
           git checkout main
           # Fast-forward if possible; otherwise take upstream's version for
           # conflicting files (theirs), keep our workflow files otherwise.
           if git merge --ff-only upstream/main; then
             echo "Fast-forwarded to upstream/main"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "Fast-forward failed, merging with 'theirs' conflict resolution"
             git merge -X theirs upstream/main -m "Sync upstream/main" || true
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Push synced main to fork
+        if: steps.merge.outputs.changed == 'true'
         run: |
           git push origin main
+
+      - name: Trigger nightly build
+        if: steps.merge.outputs.changed == 'true'
+        run: |
+          gh workflow run nightly.yml --ref main --repo tyyuuii/goose
+        env:
+          GH_TOKEN: ${{ github.token }}
