@@ -124,3 +124,33 @@ jobs:
 
       - name: Test compiler, generated C, runtime lifecycle and samples
         run: python test/run_tests.py --exe build-sanitize/goose --profile sanitize --cc clang
+
+  # Termux does not have native GitHub Actions runners, so this job runs the
+  # same toolchain Termux uses (clang, cmake, make, python, git) on Ubuntu.
+  # On a real Termux device the equivalent install is:
+  #   pkg install cmake clang git python make
+  termux:
+    name: Termux-equivalent (clang + cmake on Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Termux-equivalent build dependencies
+        run: >-
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          clang cmake make git python3 ninja-build
+
+      - name: Configure
+        run: cmake -B build-termux -DCMAKE_BUILD_TYPE=Debug -DGOOSE_BUILTIN_LIBS=all
+
+      - name: Build
+        run: cmake --build build-termux --config Debug
+
+      - name: Smoke test the compiler
+        run: build-termux/goose --version
