@@ -41,10 +41,12 @@
 // JoinCycle), and which a back edge must then pass exactly as the entry call
 // did (ValidatePoolArgs) -- or at a threaded parameter: a class of exactly
 // rooted references or slices that every call into the cycle passes on as
-// it was first given, from storage outside every cycle (ThreadedClass). A
-// back edge may pass a threaded class something else, so a store relies on
-// it, and that call is then an error at the store (ValidateThreadArgs). A
-// cycle's *return* roots, shrinks, growths, stores and rebinds cannot come
+// it was first given, from storage outside every cycle, or gives storage
+// outside the cycle that outlives it, such as what it reads out of a free
+// variable (ThreadedClass, bounded). A back edge may pass a threaded class
+// something else, so a store relies on it, and that call is then an error
+// at the store (ValidateThreadArgs). A cycle's *return* roots, shrinks,
+// growths, stores and rebinds cannot come
 // from its bodies' records while a back edge reaches a function before its
 // body is checked through, so a cycle is checked in rounds: the first with
 // back edges that have no effects and results pointing nowhere yet, each
@@ -2285,7 +2287,20 @@ struct TypeCheck {
     void JudgeCallCasts(vector<SFunction *> &cands, MatchInfo &best, vector<Node *> &argnodes,
                         vector<Val> &argvals, const function<bool(vector<Val> &)> &resolves);
     void RecheckArgs(Call *c, vector<SFunction *> &cands, MatchInfo &mi, FnSpec *denv,
-                     vector<Node *> &argnodes, int skip, const function<void()> &atskip);
+                     vector<Node *> &argnodes, int skip, const function<void()> &atskip,
+                     bool entryreach);
+    // A call checked as an operand of a call that is `discovering` is checked
+    // again, in full, in that call's phase 2, so its own phase 2 waits for
+    // that check: run at every level of a nesting, it would double the
+    // checks per level. `phase2waits` holds the calls whose last check
+    // waited, `nowait` the one CheckWaitingArg checks again in full.
+    unordered_set<Node *> phase2waits;
+    Node *nowait = nullptr;
+    bool Phase2Waits(Call *c) {
+        auto &p = cur.nodepath;
+        return c != nowait && p.size() > 1 && p.back().node == c && p[p.size() - 2].discovering;
+    }
+    void CheckWaitingArg(Call *c, Node *a, bool entryreach);
     void CalleesReturn(Call *c, const vector<FnSpec *> &specs, bool argsreach);
     // `defaults`: the call may leave out parameters that have a default
     // (§7.1), which ResolveCall then passes. Tag dispatch and rendering
@@ -2356,23 +2371,30 @@ struct TypeCheck {
     // which every call back into the recursive cycle passes on as that call
     // did: in every activation it points where that argument did, so where
     // that is outside the cycle, a reference rooted at it may be stored
-    // inside the cycle as one rooted at a pool may (§7.8). Nothing makes a
-    // back edge pass it on, so it is restricted only once a store relies on
-    // it: a call back into the cycle passing something else is then an error
-    // at that store; one checked before any store leaves it pass-down-only.
+    // inside the cycle as one rooted at a pool may (§7.8). Or, bounded, one
+    // that points outside the cycle in every activation, though not at the
+    // same storage. Nothing makes a back edge pass it on, so it is
+    // restricted only once a store relies on it: a call back into the cycle
+    // passing something else is then an error at that store; one checked
+    // before any store leaves it pass-down-only.
     struct ThreadedClass {
         bool broken = false;
-        string why;                  // What broke it, as the diagnostics say.
+        string why;                  // What broke or bounded it, as the diagnostics say.
         // The classes created from its parameters' values, or given them at a
         // back edge: each points where it does only while it stays threaded.
         vector<VarDef *> heirs;
-        // Its arguments are read through a threaded class rather than rooted
-        // at one exactly: in every activation it points into storage that
-        // class leads to, though not into the same part of it.
+        // Its arguments are read through a threaded class or out of a
+        // variable rather than rooted at one exactly, or a call back into the
+        // cycle passes it other storage outside the cycle (PointsOutside): in
+        // every activation it points outside the cycle, though not at the
+        // same storage.
         bool bounded = false;
     };
     unordered_map<VarDef *, ThreadedClass> threadedclasses;
+    size_t threadbounds = 0;   // Classes BoundThread bounded, for a cycle's rounds to settle.
     void ValidateThreadArgs(FnSpec *spec, vector<Val> &argvals, Node *callnode);
+    bool PointsOutside(VarDef *pr, const Roots &v, vector<VarDef *> &through);
+    void BoundThread(VarDef *cls, const string &why);
     void NoteThreadedClass(VarDef *cls);
     bool ThreadedChain(VarDef *r);
     bool ThreadStorable(VarDef *r);
@@ -3143,7 +3165,7 @@ struct TypeCheck {
             CheckRoot([&] { CheckExport(sf); });
         }
         if (library && !exportcount)
-            throw CompileError { "--header requires at least one export fn" };
+            throw CompileError { "--header and --shared require at least one export fn" };
         CheckRoot([&] { CheckGlobalShrinks(); });
         CheckRoot([&] { SettleParamRootExactness(); });
         CheckRoot([&] { ResolveGrowConflicts(); });

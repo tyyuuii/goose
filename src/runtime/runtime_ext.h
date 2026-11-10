@@ -353,6 +353,12 @@ GS_API uint64_t gs_os_random_u64(void);
    cached tops first; C called from Goose must not call it. 0 means an OS
    request failed; a top outside its region panics. */
 GS_API uint8_t gs_trim_memory(void);
+/* The shortest digits of a finite double, by magnitude: the ones print
+   writes (runtime_impl.h's gs_float_digits), into dig, which holds at least
+   17. Their count, and in *point the power of ten they are a fraction of:
+   they spell 0.d1 d2 ... * 10^*point. 0 for zero, NaN and the infinities.
+   Behind std's float_text::shortest_digits, for json's format_number. */
+GS_API int64_t gs_f64_digits(double x, sl_u8 dig, int64_t *point);
 /* std's slice_pool (stdlib/slice_pool_internal.goose) keeps its freelist in
    a checked copy of the runtime's span tree (runtime_os.h): `nodes` is a
    node[>..] of GS_SPAN_NODE-byte nodes, and `tree` its header, a field
@@ -364,3 +370,7 @@ GS_API void gs_slice_pool_free(gs_rref nodes, void *tree, int64_t idx, int64_t c
                                const gs_loc *at);
 GS_API int64_t gs_slice_pool_regrow(gs_rref nodes, void *tree, int64_t len, int64_t idx,
                                     int64_t ol, int64_t cnt, const gs_loc *at);
+/* slice_pool's trim: discards the complete pages inside every free span of
+   `items`, elements of `elem` bytes; 0 means an OS request failed. */
+GS_API uint8_t gs_slice_pool_trim(gs_rref nodes, void *tree, sl_u8 items, int64_t elem,
+                                  const gs_loc *at);

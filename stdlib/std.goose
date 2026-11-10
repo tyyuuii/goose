@@ -58,11 +58,13 @@ checkfree fn sign(x: f64) -> f64 {
 checkfree fn lerp(a: f32, b: f32, t: f32) -> f32 { a + (b - a) * t }
 checkfree fn lerp(a: f64, b: f64, t: f64) -> f64 { a + (b - a) * t }
 
-// The smallest power of two that is at least max(x, 1).
+// The smallest power of two that is at least max(x, 1), aborting past 2^62.
 checkfree fn next_pow2(x: i64) -> i64 {
-    var p = 1;
-    while p < x { p = p * 2; }
-    return p;
+    if x <= 1 { return 1; }
+    assert(x <= 1 << 62);
+    var v = (x - 1) as! u64;
+    v |= v >> 1; v |= v >> 2; v |= v >> 4; v |= v >> 8; v |= v >> 16; v |= v >> 32;
+    return (v + 1) as! i64;
 }
 
 // The bits set, and the leading / trailing zero bits, 64 for zero: the
@@ -363,6 +365,7 @@ fn each_rev<T, F>(xs: T[:]) {
 
 // F(chunk, i) over consecutive slices of n elements; the last may be short.
 fn each_chunk<T, F>(xs: T[:], n: i64) {
+    assert(n > 0);
     var i = 0;
     var k = 0;
     while i < xs.len {
@@ -472,15 +475,19 @@ fn lower_bound<T, F>(xs: T[:]) -> i64 {
     return lo;
 }
 
-// xs sorted by <: the position of v (or where it would go), and whether it is there.
+// xs sorted by < (or by F(a, b), "a goes before b"): the position of v (or
+// where it would go), and whether it is there.
 fn binary_search<T>(xs: T[:], v: T) -> i64, bool {
+    return binary_search(xs, v) { a, b => a < b };
+}
+fn binary_search<T, F>(xs: T[:], v: T) -> i64, bool {
     var lo = 0;
     var hi = xs.len;
     while lo < hi {
         let mid = lo + (hi - lo) / 2;
-        if xs[mid] < v { lo = mid + 1; } else { hi = mid; }
+        if F(xs[mid], v) { lo = mid + 1; } else { hi = mid; }
     }
-    return lo, lo < xs.len && xs[lo] == v;
+    return lo, lo < xs.len && !F(v, xs[lo]);
 }
 
 // The first / last occurrence of a subsequence, -1 if none.
@@ -1197,7 +1204,8 @@ fn format_flt(out: u8[>..]&, v: f64, decimals: i64) {
         return;
     }
     var x = v;
-    if x < 0.0 {
+    // The sign bit rather than x < 0.0: -0.0 writes its sign, as printf does.
+    if (float_text::bits_of(x) >> 63) != 0 {
         out.push('-');
         x = -x;
     }
@@ -1901,6 +1909,12 @@ fn float_text::eisel_lemire(mant: u64, exp10: i64) -> f64, bool {
 // of two, and its inverse.
 extern fn float_text::frexp(x: f64, e: i32&) -> f64;
 extern fn float_text::ldexp(x: f64, e: i32) -> f64;
+
+// The digits of the shortest form of x, finite and not zero, by magnitude:
+// the runtime's own, what print writes, into out, which holds at least 17.
+// Their count, and in `point` the power of ten they are a fraction of:
+// 0.d1 d2 ... dn * 10^point.
+extern fn float_text::shortest_digits(x: f64, out: u8[:], point: i64&) -> i64 = "gs_f64_digits";
 
 // The double nearest to D * 10^e10, D the decimal digits text[from..to]
 // (a point among them is passed over), given an estimate v within a few

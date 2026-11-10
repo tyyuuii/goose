@@ -11,7 +11,10 @@ fn scalars() {
     print(abs(nz), " ", abs(nzf), " ", 1.0 / abs(nz), " ", 1.0 / abs(nzf));              // 0.0 0.0 inf inf
     print(sign(-9), " ", sign(0), " ", sign(4), " ", sign(-0.5), " ", sign(2.0));        // -1 0 1 -1.0 1.0
     print(lerp(0.0, 10.0, 0.25));                                                      // 2.5
-    print(next_pow2(0), " ", next_pow2(1), " ", next_pow2(5), " ", next_pow2(64));     // 1 1 8 64
+    let max_pow2: i64 = 1 << 62;
+    print(next_pow2(-10), " ", next_pow2(0), " ", next_pow2(1), " ", next_pow2(5), " ",
+          next_pow2(64));                                                              // 1 1 1 8 64
+    print(next_pow2(max_pow2 - 1) == max_pow2, " ", next_pow2(max_pow2) == max_pow2);  // true true
     print(popcount(255), " ", popcount(0), " ", clz(1), " ", ctz(8), " ", clz(0));      // 8 0 63 3 64
     let top: u64 = 0x8000000000000000;
     let ones: u64 = 0xffffffffffffffff;
@@ -216,6 +219,12 @@ fn searching() {
     var tot = 0;
     each_chunk(xs, 2) { c, i => chunks += 1; tot += c.len * (i + 1); };
     print(chunks, " ", tot);                                                   // 3 9
+    var big_chunks = 0; // chunk size larger than slice, 1 chunk containing all elements
+    each_chunk(xs, 10) { c, i => big_chunks += 1; assert(c.len == xs.len); };
+    assert(big_chunks == 1);
+    var empty_chunks = 0; // empty slice, run 0 times
+    each_chunk(xs[..0], 2) { c, i => empty_chunks += 1; };
+    assert(empty_chunks == 0);
     let f = find(xs) { it > 6 };
     if f { print(f); }                                                         // 9
     print(find_index(xs) { it == 1 }, " ", find_index(xs) { it == 2 });        // 3 -1
@@ -230,6 +239,10 @@ fn searching() {
     print(p, " ", found);                                                      // 3 true
     let q, found2 = binary_search(sorted, 4);
     print(q, " ", found2);                                                     // 2 false
+    let desc = [10, 8, 6, 4, 2];
+    let r, found3 = binary_search(desc, 8) {a, b => b < a};
+    let s, found4 = binary_search(desc, 5) { a, b => b < a };
+    print(r, " ", found3, " ", s, " ", found4);                                // 1 true 3 false
     print(find("hello world", "o w"), " ", rfind("hello world", "o"), " ", find("abc", "x"));   // 4 7 -1
     print(find("aab", "ab"), " ", rfind("abab", "ab"), " ", find("ab", ""), " ", rfind("ab", ""),
           " ", find("a", "ab"));                                               // 1 2 0 2 -1
@@ -377,6 +390,16 @@ fn strings() {
     h.resize(0);
     format_flt(h, 1.7976931348623157e308, 0);
     print(h.len, " ", h[..10]);                                                // 309 1797693134
+    let negzero: f64 = -0.0;
+    h.resize(0);
+    format_flt(h, negzero, 0);
+    h.push(' ');
+    format_flt(h, negzero, 2);
+    h.push(' ');
+    format_flt(h, negzero, 20);
+    h.push(' ');
+    format_flt(h, 0.0, 2);
+    print(h);                                                                  // -0 -0.00 -0.00000000000000000000 0.00
     let v, ok = parse_int("-123");
     print(v, " ", ok);                                                         // -123 true
     let v2, ok2 = parse_int("12x");

@@ -100,7 +100,9 @@ in `main.cpp`). The typechecker recurses as deep as the program's
 compile-time call path (§3.1 below), and the platforms' main threads get
 anything from 1 MB (Windows) to 8 MB (Linux and macOS by default). The stack
 is reserved address space, committed only as deep as a compile goes. A JIT
-run starts the program back on the main thread, because macOS only lets a
+run has TinyCC compile the C on such a thread as well (`CompileJit` in
+`jit.h`), since TinyCC's parser recurses as deep as the C nests, and starts
+the program back on the main thread (`RunJit`), because macOS only lets a
 window be created on the main thread. On Windows and macOS the link also
 reserves 64 MB for the main thread's stack (`CMakeLists.txt`). On Linux the
 main thread has the stack limit the process started with (`ulimit -s`),
@@ -1484,7 +1486,9 @@ references in a pool class are exempt from the cycle store rule.
 `classpool` is the global pool every member is rooted in, when all agree
 (§3.13). Any other class whose members are all exactly rooted references or
 slices is a **threaded** candidate (`TypeCheck::ThreadedClass`), exempt in
-the same way while every call back into its cycle passes it on (§3.11). A
+the same way while every call back into its cycle passes it on or gives it
+storage outside the cycle, and so is one whose arguments were each read
+out of such storage (`bounded`, §3.11). A
 synthetic class root is told apart from a variable by its `classfrom`,
 since a variable whose declaration is being checked has no type yet
 either.
@@ -1542,9 +1546,12 @@ references or slices, `HoldsPlainRef`) meets a destination with a root:
    activation's own reference variable is exempt, §7.8):
    * a reference into a global, a pool-class parameter or a local of an
      enclosing non-cycle function (`CycleStorable`);
-   * a reference into a threaded parameter class, where every class among
-     the destination's storages is threaded too (`ThreadStorable`,
-     `ThreadedChain`, §3.11);
+   * a reference into a threaded parameter class whose ultimate root lies
+     outside every cycle (`ThreadStorable`), bounded or not, where every
+     class among the destination's storages is a pool or threaded and not
+     bounded (`ThreadedChain`, §3.11). A holder parameter's class is what
+     its references point at, so a holder whose contents are rooted at a
+     threaded class counts as such a reference;
 5. the store is **recorded** on each of those storages, with one event per
    alternative of the value.
 
@@ -3026,12 +3033,14 @@ cycle member.
 
 **Threaded parameters.** A parameter class other than a pool is threaded
 (`ThreadedClass`, noted by `NoteThreadedClass`) when the call that created
-it rooted all of its members exactly, as references or slices. It stays
-threaded until a call into its cycle passes one of its parameters
-something other than an exact root at the same ultimate root, reached
-through classes that are themselves pools or threaded
-(`ValidateThreadArgs`, `ThreadedChain`). While the class is threaded, it
-points in every activation to where its creating call's argument did.
+it rooted all of its members exactly, as references or slices. A call into
+its cycle that passes one of its parameters the parameter itself, or an
+exact root at the same ultimate root reached through classes that are
+themselves pools or threaded, keeps it so (`ValidateThreadArgs`,
+`ThreadedChain`). One that passes anything else bounds it (below) where
+what it passes points outside the cycle (`PointsOutside`), and breaks it
+otherwise. While the class is threaded and not bounded, it points in every
+activation to where its creating call's argument did.
 Both back edges and calls that reach a finished member of a cycle still
 being checked are checked this way: the member's body's calls back into
 the cycle were checked with what the member was first given, and they pass
@@ -3059,14 +3068,34 @@ at a threaded class relies on it like any other value: every one of its
 roots must be storable.
 
 A class is also threaded, but `bounded` (`ThreadedClass::bounded`), when
-each of its members' arguments was read through one pool class or one
-class threaded exactly (the argument has one alternative, inexact, rooted
-there). What a bounded class points at lies in storage that the pool or
-threaded class leads to, outside the cycle, which makes it storable. But
-that may be different storage in each activation, so `ThreadedChain`
-accepts it for no destination, and a class created from a bounded class
-is bounded as well. A call into the cycle keeps a bounded class threaded
-if it passes one alternative at the same ultimate root, exact or not.
+each of its members' arguments has one alternative, inexact, rooted at a
+pool class or a class threaded exactly (read through it), or at a
+variable (read out of it, or a reference it holds). A holder parameter's
+class (§3.5) is judged by its argument's contents, exact or not, and is
+threaded only this way. What a bounded class points at lies outside the
+cycle in every activation as long as `ThreadStorable` finds its ultimate
+root there, which makes it storable. But that may be different storage in
+each activation, so `ThreadedChain` accepts it for no destination, and a
+class created from a bounded class is bounded as well.
+
+A call into the cycle keeps a bounded class threaded if it passes one
+alternative at the same ultimate root, exact or not, reached through a
+class `ThreadedChain` accepts. A call that passes a threaded class
+anything else bounds it, and its heirs with it (`BoundThread`, which also
+fills `ThreadedClass::why`), when every alternative of the argument (of
+its contents, for a holder) points outside the cycle and outlives the
+class (`PointsOutside`): the class itself, exactly or as a bound, which is
+what was read through it or out of storage holding only what it points at;
+a root `CycleStorable` accepts, which is what was read out of a global, a
+pool or a free variable; or a class `ThreadStorable` accepts, whose heir
+the class becomes. The cycle store rule is what keeps references to a
+cycle's locals out of all of these, so what is read out of them points
+outside the cycle as well. The depth check (no alternative deeper than the
+class) keeps the argument alive as long as the creating call's, against
+which the body checked its stores, and a store such a call makes in a
+deeper activation reaches its callers through the back edge's mapping of
+the record (`ApplyCalleeStores`), so their shrink scans see where it went.
+Any other argument breaks the class (`Unthread`).
 
 A recursion whose types never repeat has no back edge: each level of the
 recursion is a new specialization, checked inside the one before, until
@@ -3089,7 +3118,12 @@ annotated body stay in `FnSpec`. Wherever a call applies its callee's
 record while the callee is in progress, `RecordOf` reads the previous
 record: `CallResult`, `ApplyCalleeShrinks`, `ApplyCalleeStores`,
 `ApplyCalleeGrows`, `ApplyCalleeLiveShrinks`, `ApplyCalleeRebinds`,
-`NamedOutside`.
+`NamedOutside`. Since the body was checked against the first call's
+arguments, a call into the cycle that maps a store through an argument
+checks the store's depth there even where the argument is exact, which
+elsewhere only an inexact one needs: a back edge may hand a parameter a
+global where the entry call gave it a local that outlives what the body
+stores there.
 
 The round marks the members `stale` and checks the head's body again on
 the same clone. A stale member is checked again when a call reaches it
@@ -3118,7 +3152,8 @@ it:
 * changed no member's record (`SameRecord`: normal completion, return
   roots, shrinks and their balances, growths, stores through classes,
   pairs, rebinds);
-* broke no threaded class; and
+* broke or bounded no threaded class (`threadbounds` counts the latter);
+  and
 * noted no fact about a variable declared outside the cycle's activations
   (`CycleRound`, marked by `NoteFact`). Such a variable is one variable at
   every level of a nested function's recursion, which a round may have
@@ -3237,6 +3272,21 @@ cloned anew at each check of their call, as a function's body is per
 specialization. But every clone of a node names that node
 (`Node::origin`), and a warning prints once for the node as the source has
 it, at the first check that gives the warning (`PrintWarning`).
+
+A call checked as an argument of a call that is resolving its overload,
+a UFCS receiver included, leaves its own phase 2 to the outer call's, which
+checks it again in full (`Phase2Waits`). Resolution needs only its result,
+and a phase 2 at every level would double the checks per level of nesting:
+`g(g(...g(x)))` and `x.g().g()...` would take time exponential in their
+depth. The waiting call still does the parts of phase 2 that check nothing:
+it undoes the reference rewrite, marks the copies its parameters take as
+temporaries, and warns about a redundant `&`. Where the outer call takes
+the argument as checked instead (the argument it dispatches on, a member
+builtin's receiver, an argument beside an exemplar's opaque value), it
+checks the argument again in full first (`CheckWaitingArg`). An error that
+only the waiting phase 2 finds is reported when the outer call checks the
+argument again. So another error in that call, in a later argument, its
+resolution or its callee's body, can be reported first.
 
 The tier is the worst match of any argument, not a sum of conversion
 costs. Concrete exact matches beat generic exact matches, which beat any
@@ -4307,6 +4357,20 @@ makes the walk more cautious. The other half of MSVC's limit is for the
 blocks codegen opens around runtime work, which are not counted. Ordinary
 programs stay far below the limit: the deepest inline in the tests,
 samples and benchmarks is 18 blocks deep.
+
+Expressions are bounded in codegen. The 256 brackets of clang count the
+expression in a statement together with the blocks around it, and MSVC
+(around 1,200 brackets), clang-cl (around 750, where its stack runs out)
+and TinyCC run out of parser stack. A scalar value whose expression nests
+`SPILLDEPTH` (32) levels deep or more, counting a control expression as a
+leaf (`NestsDeep`), is read into a temporary where `GenX` produces it
+(`Spills`), so a sum of 20,000 terms becomes a statement per term past the
+first 32. A level costs at most about 4 brackets once runtime.h's
+arithmetic macros are expanded, so an expression stays near 130 of them,
+which leaves clang room for the 64 blocks of `MAXNEST` around it. `HasStmts` reports such a node as one
+with statements, so operands to its left are read into temporaries
+first, as for a call (§3.15). No program in the tests, samples or
+benchmarks nests that deep; the deepest nests between 16 and 31 levels.
 
 **Base-case inlining** (`BaseCaseInliner`, `optimize_basecase.h`) applies
 to a `recursive fn` whose body *starts* with `if c { return e; }`
@@ -5802,7 +5866,10 @@ which C float literals and dumps use, is the same text, with its digits
 from `std::to_chars`. Infinities and NaNs are written by the runtime
 (`inf`, `-inf`, `nan`) rather than by the C library, which differs between
 backends: msvcrt writes `1.#INF` and `-1.#IND`, and others print a NaN's
-sign.
+sign. The same digits, without the layout, are what `gs_f64_digits` hands
+`std`'s `float_text::shortest_digits`: `json::format_number` finds the
+digits of doubles from about 1e-10 to 2^51 with ryu's loop on exact 128-bit
+values in Goose, and takes the runtime's for the rest.
 
 **Output.** `print` renders its whole line, including the newline, into a
 statement-stack builder and hands it to one `fwrite` (`gs_out_bytes`) on an
@@ -7064,8 +7131,9 @@ refuses outright:
   rooted at globals or static data (TODO 0d); a long-distance return out of
   a function value's body is mapped through the calls it leaves (§3.12).
 * Inside a recursive cycle, a reference rooted at a caller's fixed-size local
-  is pass-down only unless the parameter it came through is threaded (§3.11).
-  The spec's cycle store rule is stated the same way and is marked for
+  is pass-down only unless the parameter it came through is threaded (§3.11):
+  every call into the cycle passes it on or gives it storage outside the
+  cycle. The spec's cycle store rule is stated the same way and is marked for
   refinement (TODO 5). Beyond the spec's rule, a merged value or a rebound
   variable that may be rooted at a threaded class is pass-down only; the
   spec stores such a value where each of its roots could be.
