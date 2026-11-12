@@ -80,7 +80,7 @@ jobs:
 
               echo "::group::Verify binary is aarch64 ELF"
               file build/goose
-              readelf -h build/goose | grep -E 'Class|Machine|Type'
+              readelf -h build/goose | grep -E "Class|Machine|Type"
               echo "::endgroup::"
 
               echo "::group::Package release directory"
