@@ -49,6 +49,7 @@ jobs:
             -v "$PWD":/work \
             -w /work \
             -e TERMUX_MAIN_PACKAGE_FORMAT=debian \
+            -e "GITHUB_SHA=$GITHUB_SHA" \
             termux/termux-docker:aarch64 \
             bash -lc '
               set -euo pipefail
