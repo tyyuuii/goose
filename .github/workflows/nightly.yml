@@ -72,7 +72,7 @@ jobs:
               echo "::group::Configure Goose (Release)"
               cmake -S . -B build \
                 -DCMAKE_BUILD_TYPE=Release \
-                -DGOOSE_VERSION="nightly-$(date -u +%Y%m%d)-${GITHUB_SHA::8}"
+                -DGOOSE_VERSION="nightly-$(date -u +%Y%m%d)-$(git rev-parse --short HEAD)"
               echo "::endgroup::"
 
               echo "::group::Build Goose"
