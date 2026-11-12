@@ -1,20 +1,25 @@
-# Nightly cross-compiled Goose for Android arm64 (Termux).
+# Nightly Goose built natively in Termux aarch64 (latest Termux) inside Docker.
 #
 # Triggers:
+#   - on every push/merge to main or master
 #   - on a schedule (every night at 02:00 UTC)
-#   - on every push to main (after sync-upstream merges latest upstream)
+#   - manually (workflow_dispatch)
 #
-# Produces an immutable tag `nightly-<YYYYMMDD>-<shortsha>` and updates a
-# single GitHub release called "Goose Nightly" so it always points to the
-# latest build. Users can install from the "nightly" release asset.
+# Runs on a native GitHub-hosted aarch64 runner (ubuntu-24.04-arm) and executes
+# the build inside the official termux/termux-docker:aarch64 container so the
+# produced binary is a genuine Termux aarch64 binary, not an NDK cross-compile.
+#
+# Produces an immutable tag `nightly-<YYYYMMDD>-<shortsha>` and updates a single
+# GitHub release called "Goose Nightly" so it always points to the latest build.
+# The build archive is also uploaded as a workflow artifact you can download.
 
 name: Nightly build for Termux (Android arm64)
 
 on:
+  push:
+    branches: [main, master]
   schedule:
     - cron: '0 2 * * *'   # nightly at 02:00 UTC
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -22,9 +27,9 @@ permissions:
 
 jobs:
   build:
-    name: Cross-compile Goose for Android arm64
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    name: Build Goose natively in Termux aarch64 (Docker)
+    runs-on: ubuntu-24.04-arm   # native aarch64 GitHub-hosted runner
+    timeout-minutes: 90
 
     steps:
       - uses: actions/checkout@v4
@@ -32,71 +37,71 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Install build dependencies
+      # Make the workspace writable by the non-root Termux user inside the
+      # container, then mount it in so build outputs land back on the runner.
+      - name: Prepare workspace for Termux container
+        run: chmod -R a+rwX "$PWD"
+
+      - name: Build Goose inside Termux aarch64 Docker
         run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
-            curl unzip zip wget file ninja-build qemu-user-static
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD":/work \
+            -w /work \
+            -e TERMUX_MAIN_PACKAGE_FORMAT=debian \
+            termux/termux-docker:aarch64 \
+            bash -lc '
+              set -euo pipefail
+              # termux-docker may not source the profile that puts
+              # $PREFIX/bin on PATH; set it explicitly.
+              export PATH="/data/data/com.termux/files/usr/bin:$PATH"
 
-      - name: Download Android NDK
-        timeout-minutes: 40
-        run: |
-          curl -L --retry 3 --retry-delay 10 \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" \
-            -H "Referer: https://developer.android.com/" \
-            -o android-ndk.zip \
-            https://dl.google.com/android/repository/android-ndk-r30-linux.zip
-          unzip -q android-ndk.zip
-          echo "NDK_DIR=$PWD/android-ndk-r30" >> "$GITHUB_ENV"
+              echo "::group::Termux sanity"
+              uname -a
+              uname -o
+              command -v clang || true
+              echo "::endgroup::"
 
-      - name: Configure CMake for Android arm64
-        run: |
-          cmake -S . -B build-android \
-            -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$NDK_DIR/build/cmake/android.toolchain.cmake" \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-21 \
-            -DANDROID_STL=c++_shared \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DGOOSE_VERSION="nightly-${GITHUB_SHA::8}"
+              echo "::group::Install Termux build dependencies"
+              apt-get update -y
+              apt-get install -y --no-install-recommends \
+                clang cmake make ninja-build git python3 file
+              echo "::endgroup::"
 
-      - name: Build Goose
-        timeout-minutes: 30
-        run: cmake --build build-android --parallel "$(nproc)"
+              echo "::group::Configure Goose (Release)"
+              cmake -S . -B build \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DGOOSE_VERSION="nightly-$(date -u +%Y%m%d)-${GITHUB_SHA::8}"
+              echo "::endgroup::"
 
-      - name: Verify binary is aarch64
-        run: |
-          file build-android/goose
-          readelf -h build-android/goose | grep -E 'Class|Machine|Type'
+              echo "::group::Build Goose"
+              cmake --build build --parallel "$(nproc)"
+              echo "::endgroup::"
 
-      - name: Generate man page (best effort)
-        run: |
-          mkdir -p dist/goose-termux-arm64/man
-          if qemu-aarch64-static build-android/goose help --man > dist/goose-termux-arm64/man/goose.1 2>/dev/null; then
-            echo "man page generated"
-          else
-            echo "man page skipped (arm64 binary cannot run on x86_64 runner)"
-          fi
+              echo "::group::Verify binary is aarch64 ELF"
+              file build/goose
+              readelf -h build/goose | grep -E 'Class|Machine|Type'
+              echo "::endgroup::"
 
-      - name: Package release directory
-        run: |
-          mkdir -p dist/goose-termux-arm64/bin
-          cp build-android/goose dist/goose-termux-arm64/bin/goose
-          cp -r build-android/tcclib dist/goose-termux-arm64/tcclib
-          cp -r stdlib dist/goose-termux-arm64/stdlib
-          cp -r docs dist/goose-termux-arm64/docs
-          cp -r samples dist/goose-termux-arm64/samples
-          cp README.md LICENSE dist/goose-termux-arm64/
-          rm -rf dist/goose-termux-arm64/samples/run_samples.py dist/goose-termux-arm64/samples/expected
+              echo "::group::Package release directory"
+              mkdir -p dist/goose-termux-arm64/bin
+              cp build/goose dist/goose-termux-arm64/bin/goose
+              cp -r stdlib dist/goose-termux-arm64/stdlib
+              cp -r docs dist/goose-termux-arm64/docs
+              cp -r samples dist/goose-termux-arm64/samples
+              cp README.md LICENSE dist/goose-termux-arm64/
+              rm -rf dist/goose-termux-arm64/samples/run_samples.py dist/goose-termux-arm64/samples/expected
+              tar -czf goose-termux-arm64.tar.gz -C dist goose-termux-arm64
+              ls -la goose-termux-arm64.tar.gz
+              echo "::endgroup::"
+            '
 
-      - name: Archive
-        working-directory: dist
-        run: tar -czf goose-termux-arm64.tar.gz goose-termux-arm64
-
-      - uses: actions/upload-artifact@v4
+      - name: Upload nightly artifact
+        uses: actions/upload-artifact@v4
         with:
           name: goose-termux-arm64-nightly
-          path: dist/goose-termux-arm64.tar.gz
-          retention-days: 3
+          path: goose-termux-arm64.tar.gz
+          retention-days: 30
 
       - name: Tag and publish nightly release
         if: github.event_name != 'pull_request'
@@ -110,20 +115,20 @@ jobs:
           git tag "$TAG"
           git push origin "$TAG"
 
-          # Write release notes to a file
-          printf 'Nightly build from commit %s on %s.\nCross-compiled for Android arm64 (aarch64) with the NDK.\n\nInstall:\n  tar xzf goose-termux-arm64.tar.gz\n  cd goose-termux-arm64\n  export GOOSE_STDLIB=$PWD/stdlib\n  export PATH=$PWD/bin:$PATH\n  ./bin/goose --version\n' \
+          # Write release notes
+          printf 'Nightly build from commit %s on %s.\nBuilt natively in Termux aarch64 (latest Termux) inside Docker on GitHub Actions.\n\nInstall:\n  tar xzf goose-termux-arm64.tar.gz\n  cd goose-termux-arm64\n  export GOOSE_STDLIB=$PWD/stdlib\n  export PATH=$PWD/bin:$PATH\n  ./bin/goose --version\n' \
             "$GITHUB_SHA::8" "$(date -u)" > /tmp/nightly-notes.txt
 
           # Create or update the "nightly" release (always latest)
           if gh release view "nightly" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "nightly" "dist/goose-termux-arm64.tar.gz" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release upload "nightly" "goose-termux-arm64.tar.gz" --clobber --repo "$GITHUB_REPOSITORY"
             gh release edit "nightly" \
               --title "Goose Nightly (${DATE})" \
               --notes-file /tmp/nightly-notes.txt \
               --repo "$GITHUB_REPOSITORY"
           else
             gh release create "nightly" \
-              "dist/goose-termux-arm64.tar.gz" \
+              "goose-termux-arm64.tar.gz" \
               --title "Goose Nightly (${DATE})" \
               --notes-file /tmp/nightly-notes.txt \
               --repo "$GITHUB_REPOSITORY"
