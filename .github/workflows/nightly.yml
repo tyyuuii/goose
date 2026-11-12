@@ -65,7 +65,7 @@ jobs:
               echo "::group::Install Termux build dependencies"
               apt-get update -y
               apt-get install -y --no-install-recommends \
-                clang cmake make ninja-build git python3 file
+                clang cmake make ninja git file
               echo "::endgroup::"
 
               echo "::group::Configure Goose (Release)"
